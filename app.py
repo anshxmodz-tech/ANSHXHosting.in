@@ -484,11 +484,11 @@ def api_create_server():
 
 @app.route('/')
 def index():
-    return render_template('landing.html')
+    return render_template('login.html')
 
-@app.route('/landing')
-def landing():
-    return render_template('landing.html')
+@app.route('/login')
+def login():
+    return render_template('login.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -1109,7 +1109,7 @@ if __name__ == '__main__':
     print("\n" + "=" * 50)
     print("🚀 JUBAYER HOSTING - FINAL")
     print("=" * 50)
-    print("📍 Landing: http://localhost:5000")
+    print("📍 login: http://localhost:5000")
     print("📍 Admin: http://localhost:5000/login")
     print("🔗 API: http://localhost:5000/api/create")
     print("👤 admin / admin123")
