@@ -1,0 +1,32 @@
+{
+    "admin": {
+        "password": "admin123",
+        "role": "admin"
+    },
+    "ANSHXMODZYT": {
+        "password": "1234567890",
+        "role": "user",
+        "servers": [
+            {
+                "server_id": "517622a2",
+                "link": "517622a2",
+                "login_url": "/517622a2/login",
+                "dashboard_url": "/517622a2/home",
+                "full_link": "http://127.0.0.1:5000/517622a2/home",
+                "type": "python",
+                "ram": "4GB",
+                "disk": "10GB",
+                "status": "running",
+                "pid": 25030,
+                "created": "2026-09-10 22:47:19.061086",
+                "expiry": "2026-10-10 22:47:19.022012",
+                "main_file": "main.py",
+                "requirements_file": "requirements.txt",
+                "cpu_limit": 80,
+                "rate_limit_exceeded": false,
+                "stopped_by_user": true,
+                "started_at": "2026-09-10 22:50:26.037665"
+            }
+        ]
+    }
+}
