@@ -28,5 +28,30 @@
                 "started_at": "2026-09-10 22:50:26.037665"
             }
         ]
+    },
+    "MRSHAH": {
+        "password": "Mrshahaayush",
+        "role": "user",
+        "servers": [
+            {
+                "server_id": "f2ba58eb",
+                "link": "f2ba58eb",
+                "login_url": "/f2ba58eb/login",
+                "dashboard_url": "/f2ba58eb/home",
+                "full_link": "http://localhost:5000/f2ba58eb/home",
+                "type": "python",
+                "ram": "1GB",
+                "disk": "2GB",
+                "status": "stopped",
+                "pid": null,
+                "created": "2026-09-11 20:29:47.766040",
+                "expiry": "2027-09-11 20:29:47.637471",
+                "main_file": "main.py",
+                "requirements_file": "requirements.txt",
+                "cpu_limit": 80,
+                "rate_limit_exceeded": false,
+                "stopped_by_user": false
+            }
+        ]
     }
 }
