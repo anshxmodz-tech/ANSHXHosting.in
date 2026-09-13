@@ -110,6 +110,7 @@
         <div class="flex gap-6 border-b border-gray-800 mb-4">
             <button onclick="showTab('console')" id="tab-console" class="pb-2 px-1 text-sm tab-active"><i class="fas fa-terminal mr-1"></i>Console</button>
             <button onclick="showTab('files')" id="tab-files" class="pb-2 px-1 text-sm text-gray-400"><i class="fas fa-folder mr-1"></i>Files</button>
+            <button onclick="showTab('website')" id="tab-website" class="pb-2 px-1 text-sm text-gray-400"><i class="fas fa-globe mr-1"></i>Website</button>
             <button onclick="showTab('github')" id="tab-github" class="pb-2 px-1 text-sm text-gray-400"><i class="fab fa-github mr-1"></i>GitHub</button>
             <button onclick="showTab('startup')" id="tab-startup" class="pb-2 px-1 text-sm text-gray-400"><i class="fas fa-rocket mr-1"></i>Startup</button>
             <button onclick="showTab('profile')" id="tab-profile" class="pb-2 px-1 text-sm text-gray-400"><i class="fas fa-user-circle mr-1"></i>My Profile</button>
@@ -174,6 +175,42 @@
                 <div id="fileList" class="divide-y divide-gray-800">
                     <div class="p-6 text-center text-gray-500">Loading...</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ============ WEBSITE HOSTING TAB ============ -->
+        <div id="website-tab" class="hidden">
+            <div class="grid md:grid-cols-3 gap-4 mb-4">
+                <div class="stat-card md:col-span-2">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                            <h3 class="font-bold text-base text-blue-400"><i class="fas fa-globe mr-2"></i>Website Hosting</h3>
+                            <p class="text-xs text-gray-500 mt-1">Host Static HTML, PHP or Python (app.py) websites. ZIP uploads support multiple files/folders.</p>
+                        </div>
+                        <span id="websiteStatus" class="text-xs text-gray-400">Checking...</span>
+                    </div>
+                    <input type="file" id="websiteInput" class="hidden" accept=".zip,.html,.htm,.php,.py">
+                    <div class="border border-dashed border-gray-700 rounded-xl p-5 text-center hover:border-blue-500 transition cursor-pointer" onclick="document.getElementById('websiteInput').click()">
+                        <i class="fas fa-cloud-upload-alt text-3xl text-blue-400 mb-2"></i>
+                        <p class="text-sm font-semibold" id="websiteFileName">Choose ZIP / HTML / PHP / PY</p>
+                        <p class="text-[11px] text-gray-500 mt-1">Maximum 50 MB • ZIP may contain index.html, index.php or app.py</p>
+                    </div>
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="deployWebsite()" class="flex-1 bg-blue-600 hover:bg-blue-500 py-2.5 rounded-lg text-sm font-bold"><i class="fas fa-rocket mr-2"></i>Deploy Website</button>
+                        <button onclick="deleteWebsite()" class="bg-red-600/80 hover:bg-red-600 px-4 py-2.5 rounded-lg text-sm font-bold"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <p class="text-[10px] text-gray-500 mb-1">LIVE URL</p>
+                    <a id="websiteUrl" href="#" target="_blank" class="block text-sm text-blue-400 break-all mb-4">Not deployed</a>
+                    <p class="text-[10px] text-gray-500 mb-1">STORAGE USED</p>
+                    <p id="websiteSize" class="text-lg font-bold text-purple-400">0 KB</p>
+                    <button onclick="copyWebsiteUrl()" class="w-full mt-4 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg text-xs font-bold"><i class="fas fa-copy mr-1"></i> Copy Live URL</button>
+                </div>
+            </div>
+            <div class="bg-[#12141c] border border-gray-800 rounded-xl p-4">
+                <h4 class="text-xs font-bold text-gray-300 mb-2"><i class="fas fa-info-circle text-blue-400 mr-1"></i>How it works</h4>
+                <p class="text-xs text-gray-500 leading-6">Upload ZIP/HTML/PHP/PY → the platform extracts it safely → auto-detects <b class="text-gray-300">index.html</b>, <b class="text-gray-300">index.php</b> or <b class="text-gray-300">app.py</b> → publishes it. PHP/Python apps run privately on a local port and are exposed through a public proxy URL.</p>
             </div>
         </div>
 
@@ -371,15 +408,65 @@
 
         function showTab(tab) {
             activeTab = tab;
-            ['console','files','github','startup','profile'].forEach(t => {
+            ['console','files','website','github','startup','profile'].forEach(t => {
                 const el = document.getElementById(`${t}-tab`);
                 const btn = document.getElementById(`tab-${t}`);
                 if(el) el.classList.toggle('hidden', t!==tab);
                 if(btn) btn.className = t===tab ? 'pb-2 px-1 text-sm tab-active' : 'pb-2 px-1 text-sm text-gray-400';
             });
             if(tab==='files') loadFileList(currentFolder);
+            if(tab==='website') loadWebsiteInfo();
             if(tab==='github') loadGitLogs();
             if(tab==='startup') loadStartup();
+        }
+
+
+        document.getElementById('websiteInput').addEventListener('change', function(){
+            const f=this.files[0];
+            document.getElementById('websiteFileName').innerText=f ? f.name : 'Choose ZIP / HTML / PHP / PY';
+        });
+
+        async function loadWebsiteInfo(){
+            try{
+                const r=await fetch(`/api/website/${currentServerId}/info`); const d=await r.json();
+                if(!r.ok) throw new Error(d.error||'Unauthorized');
+                const runtime=(d.runtime||'static').toUpperCase();
+                document.getElementById('websiteStatus').innerHTML=d.deployed
+                    ? `<span class="text-green-400"><i class="fas fa-circle text-[7px]"></i> ${runtime}${d.running?' • LIVE':' • STOPPED'}</span>`
+                    : '<span class="text-gray-500">Not deployed</span>';
+                document.getElementById('websiteSize').innerText=d.size_display;
+                const a=document.getElementById('websiteUrl'); a.href=d.live_url||'#'; a.innerText=d.deployed ? d.live_url : 'Not deployed';
+            }catch(e){ document.getElementById('websiteStatus').innerText='Unavailable'; }
+        }
+
+        async function deployWebsite(){
+            const input=document.getElementById('websiteInput');
+            if(!input.files[0]) return showToast('Select a ZIP, HTML, PHP or Python file first!', 'warning', 3000);
+            const f=input.files[0];
+            if(f.size>50*1024*1024) return showToast('Maximum upload size is 50 MB!', 'error', 4000);
+            const fd=new FormData(); fd.append('file',f);
+            showToast('Uploading and deploying website...', 'info', 0);
+            try{
+                const r=await fetch(`/api/website/${currentServerId}/deploy`,{method:'POST',body:fd}); const d=await r.json();
+                if(r.ok && d.success){ showToast('Website deployed successfully!', 'success', 4000); loadWebsiteInfo(); }
+                else showToast(d.error||'Deployment failed!', 'error', 5000);
+            }catch(e){ showToast('Upload failed. Check your connection.', 'error', 4000); }
+        }
+
+        async function deleteWebsite(){
+            if(!confirm('Remove the currently hosted website?')) return;
+            try{
+                const r=await fetch(`/api/website/${currentServerId}/delete`,{method:'POST'}); const d=await r.json();
+                if(r.ok){ showToast('Website removed.', 'warning', 3000); loadWebsiteInfo(); }
+                else showToast(d.error||'Delete failed!', 'error', 4000);
+            }catch(e){ showToast('Request failed!', 'error', 4000); }
+        }
+
+        async function copyWebsiteUrl(){
+            const url=document.getElementById('websiteUrl').href;
+            if(!url || url==='#') return showToast('Deploy a website first!', 'warning', 3000);
+            try{ await navigator.clipboard.writeText(url); showToast('Live URL copied!', 'success', 2500); }
+            catch(e){ showToast('Could not copy URL.', 'error', 2500); }
         }
 
         function runServer() {
@@ -742,4 +829,4 @@
         setInterval(() => { if(activeTab==='console') loadLogs(); updateStats(); if(activeTab==='github') loadGitLogs(); }, 3000);
     </script>
 </body>
-</html>
+                                                                                                               </html>
