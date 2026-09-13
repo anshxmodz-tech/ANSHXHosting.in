@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, abort
 import json
 import os
 import subprocess
@@ -12,6 +12,9 @@ import threading
 import time
 import zipfile
 import psutil
+import urllib.request
+import urllib.error
+from urllib.parse import urlsplit
 
 app = Flask(__name__)
 app.secret_key = 'jubayer-super-secret-key-2026'
@@ -19,11 +22,13 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 USERS_FILE = 'users.json'
 BOTS_DIR = 'bots'
+WEBSITES_DIR = 'websites'
 CPU_HISTORY = {}
 CRASH_COUNT = {}
 NET_STATS = {}
 
 os.makedirs(BOTS_DIR, exist_ok=True)
+os.makedirs(WEBSITES_DIR, exist_ok=True)
 
 # ============================================
 # রেট লিমিট
@@ -90,13 +95,13 @@ def generate_random_password(length=10):
 
 def load_users():
     if not os.path.exists(USERS_FILE):
-        default = {"admin": {"password": "admin123", "role": "admin"}}
+        default = {"admin": {"password": "ANSHBHAI", "role": "ADMIN"}}
         save_users(default)
         return default
     with open(USERS_FILE, 'r', encoding='utf-8') as f:
         data = json.load(f)
     if 'admin' not in data:
-        data['admin'] = {"password": "admin123", "role": "admin"}
+        data['admin'] = {"password": "ANSHBHAI", "role": "admin"}
         save_users(data)
     return data
 
@@ -142,11 +147,11 @@ def create_default_files(server_dir):
     main_py = os.path.join(server_dir, 'main.py')
     if not os.path.exists(main_py):
         with open(main_py, 'w', encoding='utf-8') as f:
-            f.write('''# JUBAYER HOSTING - Default Bot
+            f.write('''# ANSHXHOSTING - Default Bot
 import time
 
 print("=" * 40)
-print("Bot is running on JUBAYER HOSTING")
+print("Bot is running on ANSHXHOSTING")
 print("Server is ready!")
 print("=" * 40)
 
@@ -405,6 +410,8 @@ def api_create_server():
     username = request.args.get('username', '').strip()
     password = request.args.get('password', '').strip()
     server_type = request.args.get('type', 'python').strip()
+    if server_type not in ('python','python_web','php','static','node'):
+        return jsonify({'status':'error','message':'Unsupported server type'}), 400
     ram = request.args.get('ram', '1GB').strip()
     disk = request.args.get('disk', '1GB').strip()
     cpu_limit = int(request.args.get('cpu', '30'))
@@ -586,6 +593,8 @@ def create_server():
     username = data.get('username', '')
     password = data.get('password', '')
     server_type = data.get('server_type', 'python')
+    if server_type not in ('python','python_web','php','static','node'):
+        return jsonify({'error':'Unsupported server type'}), 400
     ram = data.get('ram', '512MB')
     disk = data.get('disk', '1GB')
     expiry_days = int(data.get('expiry_days', 30))
@@ -605,7 +614,7 @@ def create_server():
         'login_url': f"/{server_id}/login",
         'dashboard_url': f"/{server_id}/home",
         'full_link': request.host_url.rstrip('/') + f"/{server_id}/home",
-        'type': server_type, 'ram': ram, 'disk': disk,
+        'type': server_type, 'runtime': ('python_web' if server_type == 'python_web' else ('php' if server_type == 'php' else ('static' if server_type == 'static' else 'bot'))), 'ram': ram, 'disk': disk,
         'status': 'stopped', 'pid': None,
         'created': str(datetime.now()), 'expiry': str(expiry_date),
         'main_file': 'main.py', 'requirements_file': 'requirements.txt',
@@ -671,25 +680,26 @@ def api_run(server_id):
     server, _ = get_server_by_id(server_id)
     if not server: return jsonify({'status': 'error', 'msg': 'Not found'})
     if server.get('status') == 'running': return jsonify({'status': 'error', 'msg': 'Already running!'})
-    
+
+    runtime = server.get('runtime', 'bot')
+    if runtime == 'php':
+        pid, port, error = run_php_web(server_id)
+        if pid:
+            return jsonify({'status':'success','msg':'PHP website started!','live_url':public_web_url(server_id,'php'),'port':port})
+        return jsonify({'status':'error','msg':error or 'Failed'})
+    if runtime == 'python_web':
+        pid, port, error = run_python_web(server_id, server.get('web_main_file','app.py'))
+        if pid:
+            return jsonify({'status':'success','msg':'Python web app started!','live_url':public_web_url(server_id,'python_web'),'port':port})
+        return jsonify({'status':'error','msg':error or 'Failed'})
+
+    # Existing bot runtime
     server['rate_limit_exceeded'] = False
     server['stopped_by_user'] = False
-    
     pid, error = run_bot(server_id, server.get('main_file', 'main.py'), server.get('requirements_file', 'requirements.txt'))
-    
     if pid:
-        users = load_users()
-        for uname, data in users.items():
-            if uname == 'admin': continue
-            servers = data.get('servers', [])
-            if not isinstance(servers, list): continue
-            for s in servers:
-                if isinstance(s, dict) and s.get('server_id') == server_id:
-                    s['status'] = 'running'
-                    s['pid'] = pid
-                    s['started_at'] = str(datetime.now())
-                    save_users(users)
-                    break
+        update_server_fields(server_id, status='running', pid=pid, started_at=str(datetime.now()),
+                             rate_limit_exceeded=False, stopped_by_user=False)
         threading.Thread(target=monitor_bot, args=(server_id, pid), daemon=True).start()
         return jsonify({'status': 'success', 'msg': 'Started!'})
     return jsonify({'status': 'error', 'msg': error or 'Failed'})
@@ -698,33 +708,24 @@ def api_run(server_id):
 def api_stop(server_id):
     server, _ = get_server_by_id(server_id)
     if not server: return jsonify({'status': 'error', 'msg': 'Not found'})
-    
+    if server.get('runtime') in ('php','python_web'):
+        stop_web_process(server_id)
+        update_server_fields(server_id, status='stopped', pid=None, web_pid=None, stopped_by_user=True)
+        return jsonify({'status':'success','msg':'Website stopped'})
     if server.get('pid'): stop_bot_process(server['pid'])
-    
-    users = load_users()
-    for uname, data in users.items():
-        if uname == 'admin': continue
-        servers = data.get('servers', [])
-        if not isinstance(servers, list): continue
-        for s in servers:
-            if isinstance(s, dict) and s.get('server_id') == server_id:
-                s['status'] = 'stopped'
-                s['pid'] = None
-                s['stopped_by_user'] = True
-                save_users(users)
-                break
-    
+    update_server_fields(server_id, status='stopped', pid=None, stopped_by_user=True)
     log_file = os.path.join(get_server_dir(server_id), 'output.log')
     try:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"\n[{datetime.now().strftime('%I:%M:%S %p')}] Server stopped by user\n")
     except: pass
-    
     return jsonify({'status': 'success', 'msg': 'Stopped'})
 
 @app.route('/api/logs/<server_id>')
 def api_logs(server_id):
-    log_file = os.path.join(get_server_dir(server_id), 'output.log')
+    server, _ = get_server_by_id(server_id)
+    log_name = 'web_output.log' if server and server.get('runtime') in ('php','python_web') else 'output.log'
+    log_file = os.path.join(get_website_dir(server_id), log_name) if log_name == 'web_output.log' else os.path.join(get_server_dir(server_id), log_name)
     if os.path.exists(log_file):
         with open(log_file, 'r', encoding='utf-8') as f: logs = f.read()
     else: logs = ""
@@ -763,8 +764,8 @@ def api_stats(server_id):
     
     uptime, cpu, ram, net_in, net_out = "0h 0m", "0%", "0 MB", "0 KB", "0 KB"
     
-    if server.get('status') == 'running' and server.get('pid'):
-        stats = get_process_stats(server['pid'])
+    if server.get('status') == 'running' and (server.get('web_pid') or server.get('pid')):
+        stats = get_process_stats(server.get('web_pid') or server.get('pid'))
         cpu = f"{stats['cpu_percent']}%"
         ram = stats['ram_display']
         net_in, net_out = get_network_stats(server['pid'])
@@ -1102,12 +1103,417 @@ def api_set_startup(server_id):
     return jsonify({'error': 'Not found'}), 404
 
 # ============================================
+# 🌐 WEBSITE / WEB APP RUNTIME
+# ============================================
+
+def allocate_web_port(server_id):
+    """Allocate a deterministic-ish localhost port for this web app."""
+    server, _ = get_server_by_id(server_id)
+    if server and server.get('web_port'):
+        return int(server['web_port'])
+    # 18000-28000 range; probe until a free port is found.
+    import socket
+    for _ in range(100):
+        port = random.randint(18000, 28000)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('127.0.0.1', port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError('Could not allocate a web port')
+
+def update_server_fields(server_id, **fields):
+    users = load_users()
+    for uname, data in users.items():
+        if uname == 'admin': continue
+        for s in data.get('servers', []) if isinstance(data.get('servers', []), list) else []:
+            if isinstance(s, dict) and s.get('server_id') == server_id:
+                s.update(fields)
+                save_users(users)
+                return True
+    return False
+
+def stop_web_process(server_id):
+    server, _ = get_server_by_id(server_id)
+    if not server: return False
+    pid = server.get('web_pid') or (server.get('pid') if server.get('runtime') in ('php','python_web') else None)
+    if not pid: return True
+    ok = stop_bot_process(pid)
+    update_server_fields(server_id, web_pid=None, pid=None, status='stopped')
+    return ok
+
+def run_python_web(server_id, main_file='app.py'):
+    root = get_website_dir(server_id)
+    main_path = safe_web_path(root, main_file)
+    if not os.path.isfile(main_path):
+        return None, None, f"{main_file} not found in website root"
+    port = allocate_web_port(server_id)
+    log_file = os.path.join(root, 'web_output.log')
+    req = os.path.join(root, 'requirements.txt')
+
+    try:
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] Starting Python web app...\n")
+            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] Command: python {main_file}\n")
+            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] PORT={port}\n")
+
+        if os.path.isfile(req):
+            with open(req, 'r', encoding='utf-8') as f:
+                has_pkgs = any(x.strip() and not x.strip().startswith('#') for x in f)
+            if has_pkgs:
+                subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', req,
+                                '--disable-pip-version-check'], cwd=root,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, timeout=300)
+
+        env = os.environ.copy()
+        env.update({'PORT': str(port), 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8'})
+        # Prefer Flask CLI for normal app.py Flask projects: this prevents hard-coded
+        # app.run(port=5000) from colliding with other hosted apps.
+        try:
+            with open(main_path, 'r', encoding='utf-8', errors='ignore') as src:
+                source = src.read()
+        except Exception:
+            source = ''
+        if 'Flask(' in source and ('from flask import' in source or 'import flask' in source):
+            command = [sys.executable, '-m', 'flask', '--app', 'app', 'run',
+                       '--host', '127.0.0.1', '--port', str(port), '--no-reload']
+        else:
+            command = [sys.executable, os.path.abspath(main_path)]
+        proc = subprocess.Popen(
+            command,
+            cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace', bufsize=1, env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
+
+        def stream():
+            try:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    for line in iter(proc.stdout.readline, ''):
+                        if line:
+                            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] {line.rstrip()}\n")
+                            f.flush()
+            except Exception:
+                pass
+
+        threading.Thread(target=stream, daemon=True).start()
+        update_server_fields(server_id, web_pid=proc.pid, pid=proc.pid, web_port=port,
+                             runtime='python_web', web_main_file=main_file,
+                             status='running', started_at=str(datetime.now()),
+                             stopped_by_user=False, rate_limit_exceeded=False)
+        threading.Thread(target=monitor_web_process, args=(server_id, proc.pid), daemon=True).start()
+        return proc.pid, port, None
+    except Exception as e:
+        return None, None, str(e)
+
+def run_php_web(server_id):
+    root = get_website_dir(server_id)
+    php = shutil.which('php')
+    if not php:
+        return None, None, "PHP runtime is not installed on the hosting server"
+    if not os.path.isfile(os.path.join(root, 'index.php')):
+        return None, None, "index.php not found in website root"
+    port = allocate_web_port(server_id)
+    log_file = os.path.join(root, 'web_output.log')
+    try:
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] Starting PHP built-in server...\n")
+            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] PHP {php} -S 127.0.0.1:{port}\n")
+        proc = subprocess.Popen(
+            [php, '-S', f'127.0.0.1:{port}', '-t', root],
+            cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace', bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
+        def stream():
+            try:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    for line in iter(proc.stdout.readline, ''):
+                        if line:
+                            f.write(f"[{datetime.now().strftime('%I:%M:%S %p')}] {line.rstrip()}\n")
+                            f.flush()
+            except Exception:
+                pass
+        threading.Thread(target=stream, daemon=True).start()
+        update_server_fields(server_id, web_pid=proc.pid, pid=proc.pid, web_port=port,
+                             runtime='php', web_main_file='index.php',
+                             status='running', started_at=str(datetime.now()),
+                             stopped_by_user=False, rate_limit_exceeded=False)
+        threading.Thread(target=monitor_web_process, args=(server_id, proc.pid), daemon=True).start()
+        return proc.pid, port, None
+    except Exception as e:
+        return None, None, str(e)
+
+def monitor_web_process(server_id, pid):
+    while True:
+        try:
+            if not psutil.pid_exists(pid):
+                break
+        except Exception:
+            break
+        time.sleep(3)
+    server, _ = get_server_by_id(server_id)
+    if not server: return
+    if server.get('web_pid') != pid: return
+    update_server_fields(server_id, web_pid=None, pid=None, status='stopped')
+
+def detect_website_runtime(root):
+    if os.path.isfile(os.path.join(root, 'app.py')):
+        return 'python_web', 'app.py'
+    if os.path.isfile(os.path.join(root, 'index.php')):
+        return 'php', 'index.php'
+    return 'static', 'index.html'
+
+def public_web_url(server_id, runtime=None):
+    runtime = runtime or (get_server_by_id(server_id)[0] or {}).get('runtime', 'static')
+    endpoint = 'host' if runtime == 'static' else 'app'
+    return url_for('serve_website' if endpoint == 'host' else 'serve_web_content', server_id=server_id, filename='', _external=True)
+
+# ============================================
+# 🌐 WEBSITE HOSTING
+# ============================================
+
+def get_website_dir(server_id):
+    """Dedicated public web root; never expose the bot directory."""
+    path = os.path.abspath(os.path.join(WEBSITES_DIR, server_id))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def owns_server(server_id):
+    """Require the logged-in user to own the server (admin is allowed)."""
+    if session.get('role') == 'admin':
+        return True
+    if session.get('role') != 'user' or session.get('current_server_id') != server_id:
+        return False
+    server, owner = get_server_by_id(server_id)
+    return bool(server and owner == session.get('user'))
+
+def safe_web_path(root, relative=''):
+    root = os.path.abspath(root)
+    target = os.path.abspath(os.path.join(root, relative))
+    if target != root and not target.startswith(root + os.sep):
+        raise ValueError('Invalid path')
+    return target
+
+def website_size(path):
+    total = 0
+    for base, _, names in os.walk(path):
+        for name in names:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+            except OSError:
+                pass
+    return total
+
+def zip_is_safe(zf, root):
+    root = os.path.abspath(root)
+    for member in zf.infolist():
+        name = member.filename.replace('\\', '/')
+        if not name or name.startswith('/') or ':' in name.split('/')[0]:
+            return False
+        target = os.path.abspath(os.path.join(root, name))
+        if target != root and not target.startswith(root + os.sep):
+            return False
+    return True
+
+def website_info(server_id):
+    root = get_website_dir(server_id)
+    runtime, main_file = detect_website_runtime(root)
+    deployed = bool(os.listdir(root))
+    server, _ = get_server_by_id(server_id)
+    running = bool(server and server.get('status') == 'running' and server.get('web_pid'))
+    url = public_web_url(server_id, runtime) if deployed else ''
+    return {
+        'deployed': deployed,
+        'has_index': os.path.exists(os.path.join(root, 'index.html')),
+        'has_php': os.path.exists(os.path.join(root, 'index.php')),
+        'has_app_py': os.path.exists(os.path.join(root, 'app.py')),
+        'runtime': runtime,
+        'main_file': main_file,
+        'running': running,
+        'port': server.get('web_port') if server else None,
+        'size_bytes': website_size(root),
+        'size_display': format_bytes(website_size(root) / 1024),
+        'live_url': url
+    }
+
+@app.route('/api/website/<server_id>/info')
+def website_api_info(server_id):
+    if not owns_server(server_id):
+        return jsonify({'error': 'Unauthorized'}), 403
+    return jsonify(website_info(server_id))
+
+@app.route('/api/website/<server_id>/deploy', methods=['POST'])
+def website_deploy(server_id):
+    if not owns_server(server_id):
+        return jsonify({'error': 'Unauthorized'}), 403
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'Select a ZIP, HTML, PHP or Python file'}), 400
+    filename = upload.filename.lower()
+    allowed = filename.endswith('.zip') or filename.endswith(('.html', '.htm', '.php', '.py'))
+    if not allowed:
+        return jsonify({'error': 'Only ZIP, HTML, PHP, PY files are supported'}), 400
+
+    root = get_website_dir(server_id)
+    tmp = os.path.join(root, '.upload.tmp')
+    stage = root + '.stage'
+    try:
+        if server := get_server_by_id(server_id)[0]:
+            if server.get('web_pid'):
+                stop_web_process(server_id)
+
+        upload.save(tmp)
+        if os.path.getsize(tmp) > 50 * 1024 * 1024:
+            return jsonify({'error': 'Maximum upload size is 50 MB'}), 413
+
+        if os.path.exists(stage): shutil.rmtree(stage)
+        os.makedirs(stage, exist_ok=True)
+
+        if filename.endswith('.zip'):
+            with zipfile.ZipFile(tmp, 'r') as zf:
+                if not zip_is_safe(zf, stage):
+                    return jsonify({'error': 'Unsafe ZIP path detected'}), 400
+                members = [m for m in zf.infolist() if not m.is_dir()]
+                if len(members) > 1000:
+                    return jsonify({'error': 'ZIP contains too many files (max 1000)'}), 400
+                total_uncompressed = sum(max(0, m.file_size) for m in members)
+                if total_uncompressed > 50 * 1024 * 1024:
+                    return jsonify({'error': 'Uncompressed website exceeds 50 MB'}), 413
+                zf.extractall(stage)
+        elif filename.endswith(('.html', '.htm')):
+            shutil.copy2(tmp, os.path.join(stage, 'index.html'))
+        elif filename.endswith('.php'):
+            shutil.copy2(tmp, os.path.join(stage, 'index.php'))
+        elif filename.endswith('.py'):
+            shutil.copy2(tmp, os.path.join(stage, 'app.py'))
+
+        # Promote a single top-level folder.
+        if not any(os.path.exists(os.path.join(stage, x)) for x in ('index.html','index.php','app.py')):
+            dirs = [x for x in os.listdir(stage) if os.path.isdir(os.path.join(stage, x)) and not x.startswith('.')]
+            if len(dirs) == 1:
+                nested = os.path.join(stage, dirs[0])
+                for item in os.listdir(nested):
+                    shutil.move(os.path.join(nested, item), os.path.join(stage, item))
+                shutil.rmtree(nested)
+
+        runtime, main_file = detect_website_runtime(stage)
+        if runtime == 'static' and not os.path.exists(os.path.join(stage, 'index.html')):
+            return jsonify({'error': 'Static website ZIP must contain index.html'}), 400
+
+        backup = root + '.backup'
+        if os.path.exists(backup): shutil.rmtree(backup)
+        if os.path.exists(root): os.rename(root, backup)
+        os.rename(stage, root)
+        if os.path.exists(backup): shutil.rmtree(backup)
+
+        # Store runtime type. Static is instantly live; PHP/Python is started on localhost and proxied.
+        update_server_fields(server_id, runtime=runtime, web_main_file=main_file,
+                             web_pid=None, web_port=None, pid=None,
+                             status='stopped', started_at=None)
+
+        if runtime == 'php':
+            pid, port, error = run_php_web(server_id)
+        elif runtime == 'python_web':
+            pid, port, error = run_python_web(server_id, main_file)
+        else:
+            pid, port, error = None, None, None
+
+        info = website_info(server_id)
+        if error:
+            return jsonify({'success': True, 'warning': error, 'runtime': runtime, **info})
+        return jsonify({'success': True, 'message': 'Website deployed successfully!',
+                        'runtime': runtime, **info})
+    except zipfile.BadZipFile:
+        return jsonify({'error': 'Invalid ZIP file'}), 400
+    except Exception as e:
+        try:
+            if os.path.exists(stage): shutil.rmtree(stage)
+        except Exception: pass
+        return jsonify({'error': f'Deployment failed: {e}'}), 500
+    finally:
+        try:
+            if os.path.exists(tmp): os.remove(tmp)
+        except Exception: pass
+
+@app.route('/api/website/<server_id>/delete', methods=['POST'])
+def website_delete(server_id):
+    if not owns_server(server_id):
+        return jsonify({'error': 'Unauthorized'}), 403
+    root = get_website_dir(server_id)
+    try:
+        stop_web_process(server_id)
+        update_server_fields(server_id, runtime='static', web_pid=None, web_port=None, pid=None, status='stopped')
+        for item in os.listdir(root):
+            target = os.path.join(root, item)
+            if os.path.isdir(target): shutil.rmtree(target)
+            else: os.remove(target)
+        return jsonify({'success': True, 'message': 'Website removed'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/host/<server_id>/', defaults={'filename': 'index.html'})
+@app.route('/host/<server_id>/<path:filename>')
+def serve_website(server_id, filename):
+    server, _ = get_server_by_id(server_id)
+    if not server: abort(404)
+    root = get_website_dir(server_id)
+    try: target = safe_web_path(root, filename)
+    except ValueError: abort(404)
+    if os.path.isdir(target):
+        filename = filename.rstrip('/') + '/index.html'
+    if not os.path.isfile(safe_web_path(root, filename)): abort(404)
+    return send_from_directory(root, filename, conditional=True)
+
+def _proxy_web_request(server_id, filename):
+    server, _ = get_server_by_id(server_id)
+    if not server or not server.get('web_port') or server.get('status') != 'running':
+        abort(503)
+    # Only proxy to a localhost process owned by this server record.
+    port = int(server['web_port'])
+    path = '/' + filename if filename else '/'
+    query = request.query_string.decode('utf-8', errors='ignore')
+    target = f"http://127.0.0.1:{port}{path}" + (f"?{query}" if query else "")
+    data = request.get_data() if request.method in ('POST','PUT','PATCH','DELETE') else None
+    headers = {}
+    for k, v in request.headers.items():
+        if k.lower() not in ('host','content-length'):
+            headers[k] = v
+    try:
+        req = urllib.request.Request(target, data=data, headers=headers, method=request.method)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read()
+            excluded = {'content-length','transfer-encoding','connection','content-encoding'}
+            out_headers = [(k,v) for k,v in resp.headers.items() if k.lower() not in excluded]
+            return body, resp.status, out_headers
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        return body, e.code, [(k,v) for k,v in e.headers.items() if k.lower() != 'content-length']
+    except Exception as e:
+        return jsonify({'error': f'Web app unavailable: {e}'}), 503, []
+
+@app.route('/app/<server_id>/', defaults={'filename': ''}, methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+@app.route('/app/<server_id>/<path:filename>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+def serve_web_content(server_id, filename):
+    server, _ = get_server_by_id(server_id)
+    if not server: abort(404)
+    runtime = server.get('runtime', 'static')
+    if runtime == 'static':
+        return serve_website(server_id, filename or 'index.html')
+    result = _proxy_web_request(server_id, filename)
+    if isinstance(result, tuple) and len(result) == 3:
+        body, status, headers = result
+        return body, status, headers
+    return result
+
+# ============================================
 # স্টার্ট
 # ============================================
 
 if __name__ == '__main__':
     print("\n" + "=" * 50)
-    print("🚀 JUBAYER HOSTING - FINAL")
+    print("🚀 ANSHXHOSTING - FINAL")
     print("=" * 50)
     print("📍 Landing: http://localhost:5000")
     print("📍 Admin: http://localhost:5000/login")
