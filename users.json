@@ -1,7 +1,7 @@
 {
     "admin": {
-        "password": "admin123",
-        "role": "admin"
+        "password": "ANSHBHAI",
+        "role": "ADMIN"
     },
     "ANSHXMODZYT": {
         "password": "1234567890",
@@ -16,16 +16,20 @@
                 "type": "python",
                 "ram": "4GB",
                 "disk": "10GB",
-                "status": "running",
-                "pid": 25030,
+                "status": "stopped",
+                "pid": null,
                 "created": "2026-09-10 22:47:19.061086",
                 "expiry": "2026-10-10 22:47:19.022012",
                 "main_file": "main.py",
                 "requirements_file": "requirements.txt",
                 "cpu_limit": 80,
                 "rate_limit_exceeded": false,
-                "stopped_by_user": true,
-                "started_at": "2026-09-10 22:50:26.037665"
+                "stopped_by_user": false,
+                "started_at": "2026-09-13 18:20:35.908313",
+                "runtime": "static",
+                "web_main_file": "app.py",
+                "web_pid": null,
+                "web_port": null
             }
         ]
     },
