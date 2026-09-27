@@ -1,5 +1,5 @@
 {
-    "admin": {
+    "ADMIN": {
         "password": "ANSHBHAI",
         "role": "ADMIN"
     },
@@ -25,7 +25,7 @@
                 "cpu_limit": 80,
                 "rate_limit_exceeded": false,
                 "stopped_by_user": false,
-                "started_at": "2026-09-13 18:20:35.908313",
+                "started_at": "2026-09-15 21:09:13.513568",
                 "runtime": "static",
                 "web_main_file": "app.py",
                 "web_pid": null,
@@ -50,6 +50,84 @@
                 "pid": null,
                 "created": "2026-09-11 20:29:47.766040",
                 "expiry": "2027-09-11 20:29:47.637471",
+                "main_file": "main.py",
+                "requirements_file": "requirements.txt",
+                "cpu_limit": 80,
+                "rate_limit_exceeded": false,
+                "stopped_by_user": false
+            }
+        ]
+    },
+    "ROLEX": {
+        "password": "ROLEXBHAI",
+        "role": "user",
+        "servers": [
+            {
+                "server_id": "bb3fe879",
+                "link": "bb3fe879",
+                "login_url": "/bb3fe879/login",
+                "dashboard_url": "/bb3fe879/home",
+                "full_link": "http://localhost:5000/bb3fe879/home",
+                "type": "python",
+                "runtime": "bot",
+                "ram": "1GB",
+                "disk": "1GB",
+                "status": "stopped",
+                "pid": null,
+                "created": "2026-09-27 09:01:10.180401",
+                "expiry": "2027-09-27 09:01:10.090620",
+                "main_file": "main.py",
+                "requirements_file": "requirements.txt",
+                "cpu_limit": 80,
+                "rate_limit_exceeded": false,
+                "stopped_by_user": false
+            }
+        ]
+    },
+    "Sharma": {
+        "password": "Sharma Ji",
+        "role": "user",
+        "servers": [
+            {
+                "server_id": "d6f6ec43",
+                "link": "d6f6ec43",
+                "login_url": "/d6f6ec43/login",
+                "dashboard_url": "/d6f6ec43/home",
+                "full_link": "http://localhost:5000/d6f6ec43/home",
+                "type": "python",
+                "runtime": "bot",
+                "ram": "1GB",
+                "disk": "1GB",
+                "status": "stopped",
+                "pid": null,
+                "created": "2026-09-27 09:01:29.398011",
+                "expiry": "2027-04-15 09:01:29.348106",
+                "main_file": "main.py",
+                "requirements_file": "requirements.txt",
+                "cpu_limit": 80,
+                "rate_limit_exceeded": false,
+                "stopped_by_user": false
+            }
+        ]
+    },
+    "RIMURUOWNER": {
+        "password": "RIMURU",
+        "role": "user",
+        "servers": [
+            {
+                "server_id": "0e37dd93",
+                "link": "0e37dd93",
+                "login_url": "/0e37dd93/login",
+                "dashboard_url": "/0e37dd93/home",
+                "full_link": "http://localhost:5000/0e37dd93/home",
+                "type": "python",
+                "runtime": "bot",
+                "ram": "1GB",
+                "disk": "1GB",
+                "status": "stopped",
+                "pid": null,
+                "created": "2026-09-27 09:01:45.709030",
+                "expiry": "2027-09-27 09:01:45.636897",
                 "main_file": "main.py",
                 "requirements_file": "requirements.txt",
                 "cpu_limit": 80,
